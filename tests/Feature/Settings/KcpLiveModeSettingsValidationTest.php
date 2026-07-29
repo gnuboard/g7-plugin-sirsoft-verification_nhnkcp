@@ -7,6 +7,7 @@ use App\Models\Permission;
 use App\Models\Role;
 use App\Models\User;
 use App\Services\PluginSettingsService;
+use App\Support\SensitiveSettingMask;
 use Illuminate\Testing\TestResponse;
 use Plugins\Sirsoft\VerificationNhnkcp\Tests\PluginTestCase;
 
@@ -133,15 +134,89 @@ class KcpLiveModeSettingsValidationTest extends PluginTestCase
     }
 
     /**
+     * 관리자 설정 응답에 암호화 키 평문이 실리지 않는지 확인한다.
+     *
+     * 저장은 암호화되어 있어도 조회 응답이 복호화된 값을 그대로 내려보내면 브라우저·개발자 도구·
+     * 프록시 로그에 비밀값이 남는다. 값이 있다는 사실만 마스크로 알려야 한다.
+     *
+     * @scenario mode=live,live_credentials=complete
+     *
+     * @effects sensitive_key_is_not_returned_in_plain_text
+     */
+    public function test_admin_response_masks_encryption_key(): void
+    {
+        $this->putSettings([
+            'is_test_mode' => false,
+            'live_site_cd' => 'A1B2C',
+            'live_enc_key' => 'super-secret-live-key',
+        ])->assertStatus(200)
+            ->assertJsonPath('data.live_enc_key', SensitiveSettingMask::MASK);
+
+        $show = $this->withHeaders([
+            'Authorization' => 'Bearer '.$this->token,
+            'Accept' => 'application/json',
+        ])->getJson('/api/admin/plugins/'.self::PLUGIN_IDENTIFIER.'/settings');
+
+        $show->assertStatus(200)->assertJsonPath('data.live_enc_key', SensitiveSettingMask::MASK);
+        $this->assertStringNotContainsString('super-secret-live-key', $show->getContent());
+
+        // 민감하지 않은 항목은 그대로 보여야 한다 (마스킹이 과하게 번지지 않는지).
+        $show->assertJsonPath('data.live_site_cd', 'A1B2C');
+    }
+
+    /**
+     * 마스크를 그대로 되돌려 보내면 저장된 값이 유지되는지 확인한다.
+     *
+     * 운영자가 암호화 키를 건드리지 않고 다른 항목만 바꿔 저장하면, 화면은 마스크를 그대로 보낸다.
+     * 그것을 값으로 받아 저장하면 저장된 키가 마스크 문자열로 덮여 운영 인증이 통째로 멈춘다.
+     *
+     * @scenario mode=live,live_credentials=complete
+     *
+     * @effects sensitive_key_is_not_returned_in_plain_text
+     */
+    public function test_resubmitting_mask_preserves_stored_key(): void
+    {
+        $this->putSettings([
+            'is_test_mode' => false,
+            'live_site_cd' => 'A1B2C',
+            'live_enc_key' => 'super-secret-live-key',
+        ])->assertStatus(200);
+
+        // 화면이 마스크를 그대로 되돌려 보내는 상황 재현
+        $this->putSettings([
+            'is_test_mode' => false,
+            'live_site_cd' => 'Z9Y8X',
+            'live_enc_key' => SensitiveSettingMask::MASK,
+        ])->assertStatus(200);
+
+        $this->assertSame(
+            'super-secret-live-key',
+            app(PluginSettingsService::class)->get(self::PLUGIN_IDENTIFIER, 'live_enc_key'),
+            '마스크 재전송은 저장된 키를 덮어써서는 안 된다',
+        );
+        $this->assertSame(
+            'Z9Y8X',
+            app(PluginSettingsService::class)->get(self::PLUGIN_IDENTIFIER, 'live_site_cd'),
+            '같은 요청의 다른 항목은 정상 저장되어야 한다',
+        );
+    }
+
+    /**
      * core.plugins.update 권한을 가진 관리자 생성.
      */
     private function createAdminUser(): User
     {
         $user = User::factory()->create();
 
-        $permission = Permission::firstOrCreate(
+        $updatePermission = Permission::firstOrCreate(
             ['identifier' => 'core.plugins.update'],
             ['name' => json_encode(['ko' => '플러그인 수정', 'en' => 'Update Plugins']), 'type' => 'admin']
+        );
+
+        // 설정 조회(GET)는 별도 권한을 요구한다 — 마스킹 응답 검증에 필요.
+        $readPermission = Permission::firstOrCreate(
+            ['identifier' => 'core.plugins.read'],
+            ['name' => json_encode(['ko' => '플러그인 조회', 'en' => 'Read Plugins']), 'type' => 'admin']
         );
 
         $adminRole = Role::firstOrCreate(
@@ -154,7 +229,7 @@ class KcpLiveModeSettingsValidationTest extends PluginTestCase
             'name' => json_encode(['ko' => '테스트', 'en' => 'Test']),
             'type' => 'admin',
         ]);
-        $testRole->permissions()->sync([$permission->id]);
+        $testRole->permissions()->sync([$updatePermission->id, $readPermission->id]);
 
         $user->roles()->attach($adminRole->id, ['assigned_at' => now(), 'assigned_by' => null]);
         $user->roles()->attach($testRole->id, ['assigned_at' => now(), 'assigned_by' => null]);

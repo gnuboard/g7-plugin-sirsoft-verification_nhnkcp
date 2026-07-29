@@ -432,6 +432,38 @@ function isChallengeConsumed(challengeId?: string): boolean {
 }
 
 /**
+ * 인증을 마치지 않고 이탈한 challenge 를 서버에도 종료로 알린다.
+ *
+ * 사용자가 인증창을 그냥 닫으면 브라우저는 그 거래를 끝난 것으로 처리하지만, 서버는 아무 통보를
+ * 받지 못해 인증 이력이 `sent` 상태로, 거래 행은 `consumed_at = NULL` 로 남는다. TTL(15분)이
+ * 지나면 만료되므로 기능 결함은 아니나, 관리자 이력에서 "보낸 뒤 소식 없는" 행이 쌓이고 그 거래키가
+ * 만료 전까지 유효한 상태로 남는다. 코어 취소 엔드포인트를 호출해 두 상태를 함께 닫는다.
+ *
+ * 실패해도 흐름을 막지 않는다 — 이탈 정리는 부가 작업이고, 재시도는 브라우저측 소비 표시만으로도
+ * 정상 동작한다(새 거래를 발급받는다).
+ *
+ * @param challengeId 이탈한 challenge 식별자
+ */
+async function reportAbandonedChallenge(challengeId?: string): Promise<void> {
+    if (!challengeId) return;
+
+    const token = getG7Core()?.api?.getToken?.() ?? null;
+
+    try {
+        await fetch(`/api/identity/challenges/${encodeURIComponent(challengeId)}/cancel`, {
+            method: 'POST',
+            credentials: 'include',
+            headers: {
+                Accept: 'application/json',
+                ...(token ? { Authorization: `Bearer ${token}` } : {}),
+            },
+        });
+    } catch (e) {
+        logger.warn('이탈 거래 취소 통보 실패 (재시도 흐름에는 영향 없음)', e);
+    }
+}
+
+/**
  * 새 challenge 를 발급받아 `_global.identityChallenge` 를 갱신한다.
  *
  * 실패 후 재시도 흐름에서만 호출된다. 코어 challenge 시작 API 를 그대로 사용하므로 거래등록도
@@ -626,9 +658,14 @@ function watchPopup(popup: Window): void {
             // 이 거래는 이미 표준창에 제출됐다. KCP 거래키에는 유효 시간이 있어 같은 거래로 다시
             // 열면 한참 뒤의 재시도가 아무 안내 없이 실패할 수 있으므로, 다시 시작할 때 새 거래를
             // 받도록 소비 표시를 남긴다.
-            markChallengeConsumed(
-                getG7Core()?.state?.getGlobal?.()?.identityChallenge?.challenge_id as string | undefined,
-            );
+            const abandonedId = getG7Core()?.state?.getGlobal?.()?.identityChallenge?.challenge_id as
+                | string
+                | undefined;
+            markChallengeConsumed(abandonedId);
+
+            // 브라우저만 알고 있으면 서버 이력은 `sent` 로, 거래 행은 `consumed_at = NULL` 로
+            // 남는다. 코어 취소 엔드포인트로 두 상태를 함께 닫는다.
+            void reportAbandonedChallenge(abandonedId);
         }
     }, POPUP_CLOSED_POLL_MS);
 }

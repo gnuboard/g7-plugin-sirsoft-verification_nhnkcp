@@ -248,6 +248,42 @@ describe('startAuth 핸들러', () => {
     });
 
     /**
+     * 인증창을 그냥 닫으면 서버에도 그 거래가 끝났음을 알려야 한다.
+     *
+     * 브라우저만 알고 있으면 인증 이력이 "보낸 뒤 소식 없는" 상태로, 거래 행은 소비 시각 없이
+     * 남는다. 만료 시간이 지나면 정리되지만 그때까지 그 거래키는 유효한 상태로 남는다.
+     *
+     * @scenario environment=desktop,outcome=cancelled
+     * @effects abandoned_challenge_is_cancelled_on_server
+     */
+    it('인증창을 그냥 닫으면 서버에 취소를 통보한다', async () => {
+        vi.useFakeTimers();
+        const popup = { closed: false, close: vi.fn() };
+        vi.stubGlobal('open', vi.fn(() => popup));
+        const fetchMock = vi.fn(async () => ({ ok: true, json: async () => ({ success: true }) }));
+        vi.stubGlobal('fetch', fetchMock as unknown as typeof fetch);
+        globalState.identityChallenge = {
+            provider_id: 'nhnkcp',
+            purpose: 'signup',
+            challenge_id: 'challenge-abandoned',
+            public_payload: { call_url: CALL_URL, reg_cert_key: REG_CERT_KEY },
+        };
+
+        await startAuthHandler();
+        popup.closed = true;
+        vi.advanceTimersByTime(500);
+        await vi.runAllTicks?.();
+
+        const calls = fetchMock.mock.calls as unknown as Array<[string, RequestInit]>;
+        const cancelCall = calls.find(([url]) => String(url).includes('/cancel'));
+        expect(cancelCall, '취소 엔드포인트 호출이 있어야 한다').toBeTruthy();
+        expect(cancelCall![0]).toBe('/api/identity/challenges/challenge-abandoned/cancel');
+        expect(cancelCall![1].method).toBe('POST');
+
+        vi.useRealTimers();
+    });
+
+    /**
      * 닫힘 감지 후에도 감시 타이머가 계속 돌면 다음 시도의 상태를 덮어써 버린다.
      *
      * @scenario environment=desktop,outcome=cancelled

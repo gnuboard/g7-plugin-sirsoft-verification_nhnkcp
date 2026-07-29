@@ -10,7 +10,7 @@ use Illuminate\Support\Facades\Lang;
  *
  * 코어 UpdatePluginSettingsRequest 의 정적 스키마는 `required`/타입 규칙만 표현할 수 있어
  * "is_test_mode=false 일 때만 live_site_cd / live_enc_key 필수" 같은 조건부 검증을 담을 수 없다.
- * 본 listener 가 `core.plugin_settings.update_rules` filter 로 라이브 모드 진입 시 라이브
+ * 본 listener 가 `core.plugin_settings.update_validation_rules` filter 로 라이브 모드 진입 시 라이브
  * 자격증명에 required 규칙을 동적 부여한다.
  *
  * 검증 기준은 KcpIdentityProvider::isAvailable() 의 라이브 운영 가능 조건과 일치시킨다.
@@ -31,7 +31,7 @@ class ValidateKcpSettingsListener implements HookListenerInterface
     public static function getSubscribedHooks(): array
     {
         return [
-            'core.plugin_settings.update_rules' => [
+            'core.plugin_settings.update_validation_rules' => [
                 'method' => 'addLiveModeRules',
                 'priority' => 10,
                 'type' => 'filter',

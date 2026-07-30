@@ -4,6 +4,7 @@ namespace Plugins\Sirsoft\VerificationNhnkcp\Listeners;
 
 use App\Contracts\Extension\HookListenerInterface;
 use Illuminate\Support\Facades\Lang;
+use Plugins\Sirsoft\VerificationNhnkcp\Identity\KcpIdentityProvider;
 
 /**
  * KCP 본인확인 설정 저장 시 라이브 모드 조건부 검증을 주입하는 filter 훅 listener.
@@ -33,6 +34,12 @@ class ValidateKcpSettingsListener implements HookListenerInterface
         return [
             'core.plugin_settings.update_validation_rules' => [
                 'method' => 'addLiveModeRules',
+                'priority' => 10,
+                'type' => 'filter',
+                'sync' => true,
+            ],
+            'core.plugin_settings.filter_save_data' => [
+                'method' => 'normalizeLiveSiteCd',
                 'priority' => 10,
                 'type' => 'filter',
                 'sync' => true,
@@ -97,6 +104,44 @@ class ValidateKcpSettingsListener implements HookListenerInterface
         }
 
         return $rules;
+    }
+
+    /**
+     * 저장 직전 운영 사이트코드에서 SM 프리픽스를 떼어 정규화한다.
+     *
+     * 설정 화면은 입력칸 왼쪽에 `SM` 배지를 따로 두고 프리픽스를 제외한 값만 받는다. 프리픽스가
+     * 포함된 채로 보관되면 화면이 `SM` + `SMA1B2C` 로 그려져 운영자에게는 프리픽스가 두 번 붙은
+     * 것처럼 보인다. 보관 형태를 프리픽스 미포함으로 통일해 화면 표시와 일치시킨다.
+     *
+     * 런타임 부착은 KcpIdentityProvider::buildLiveSiteCd() 가 계속 담당하므로 최종 사이트코드는
+     * 정규화 전후가 동일하다.
+     *
+     * @param  array<string, mixed>  $settings  저장 요청 설정 배열
+     * @param  string  $identifier  저장 대상 플러그인 식별자
+     * @return array<string, mixed> 사이트코드가 정규화된 설정 배열
+     */
+    public function normalizeLiveSiteCd(array $settings, string $identifier): array
+    {
+        if ($identifier !== self::IDENTIFIER || ! isset($settings['live_site_cd'])) {
+            return $settings;
+        }
+
+        if (! is_string($settings['live_site_cd'])) {
+            return $settings;
+        }
+
+        $value = trim($settings['live_site_cd']);
+        $prefix = KcpIdentityProvider::LIVE_SITE_CD_PREFIX;
+
+        // 프리픽스 판정은 buildLiveSiteCd() 와 같은 기준(대소문자 무시)을 쓴다 — 두 곳이 어긋나면
+        // 한쪽은 떼고 다른 쪽은 붙이지 않아 사이트코드가 조용히 달라진다.
+        if (strncasecmp($value, $prefix, strlen($prefix)) === 0) {
+            $value = substr($value, strlen($prefix));
+        }
+
+        $settings['live_site_cd'] = $value;
+
+        return $settings;
     }
 
     /**

@@ -675,6 +675,11 @@ class KcpIdentityProvider implements IdentityVerificationInterface
      * 운영자가 설정 UI 에서 프리픽스 분리형 input 으로 입력하므로 일반적으로 프리픽스 미포함
      * 값이 들어오지만, 직접 프리픽스를 포함해 입력한 경우에도 중복 부착하지 않는다.
      *
+     * 프리픽스 판정은 대소문자를 구분하지 않고, 결과는 KCP 정책값(대문자)으로 정규화한다.
+     * 사이트코드는 대문자로 발급되지만 프리픽스를 손으로 옮겨 적는 과정에서 소문자가 섞일 수
+     * 있는데, 대소문자를 구분해 판정하면 `SMsmA1B2C` 가 만들어져 모든 인증 요청이 잘못된
+     * 사이트코드로 나간다.
+     *
      * @param  string  $value  운영자 입력 값
      * @return string 프리픽스가 보장된 라이브 사이트코드
      */
@@ -685,9 +690,13 @@ class KcpIdentityProvider implements IdentityVerificationInterface
             return '';
         }
 
-        return str_starts_with($value, self::LIVE_SITE_CD_PREFIX)
-            ? $value
-            : self::LIVE_SITE_CD_PREFIX.$value;
+        $prefixLength = strlen(self::LIVE_SITE_CD_PREFIX);
+
+        if (strncasecmp($value, self::LIVE_SITE_CD_PREFIX, $prefixLength) === 0) {
+            return self::LIVE_SITE_CD_PREFIX.substr($value, $prefixLength);
+        }
+
+        return self::LIVE_SITE_CD_PREFIX.$value;
     }
 
     /**

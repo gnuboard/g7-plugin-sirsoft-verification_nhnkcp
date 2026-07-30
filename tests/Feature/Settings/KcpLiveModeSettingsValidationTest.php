@@ -202,6 +202,58 @@ class KcpLiveModeSettingsValidationTest extends PluginTestCase
     }
 
     /**
+     * 사이트코드에 SM 프리픽스를 포함해 입력하면 저장 시 프리픽스를 떼고 보관해야 한다.
+     *
+     * 설정 화면은 입력칸 왼쪽에 `SM` 배지를 따로 두고 "SM 을 제외한 값만" 받는다. 프리픽스가
+     * 포함된 채로 저장되면 화면이 `SM` + `SMZ9Y8X` 로 그려져 운영자에게는 프리픽스가 두 번
+     * 붙은 것처럼 보인다. 저장값을 프리픽스 미포함으로 정규화해 화면 표시와 보관 형태를
+     * 일치시킨다 (런타임 부착은 buildLiveSiteCd 가 계속 담당).
+     *
+     * @scenario mode=live,live_credentials=complete
+     *
+     * @effects sm_prefix_is_added_once
+     */
+    public function test_site_cd_is_stored_without_sm_prefix(): void
+    {
+        foreach (['SMZ9Y8X' => 'Z9Y8X', 'smZ9Y8X' => 'Z9Y8X', 'Z9Y8X' => 'Z9Y8X'] as $input => $expected) {
+            $this->putSettings([
+                'is_test_mode' => false,
+                'live_site_cd' => $input,
+                'live_enc_key' => 'super-secret-live-key',
+            ])->assertStatus(200);
+
+            $this->assertSame(
+                $expected,
+                app(PluginSettingsService::class)->get(self::PLUGIN_IDENTIFIER, 'live_site_cd'),
+                "입력 [{$input}] 은 프리픽스 없이 보관되어야 한다",
+            );
+        }
+    }
+
+    /**
+     * 정규화 후에도 런타임 사이트코드는 프리픽스가 붙은 최종값이어야 한다.
+     *
+     * @scenario mode=live,live_credentials=complete
+     *
+     * @effects sm_prefix_is_added_once
+     */
+    public function test_normalized_site_cd_still_resolves_with_prefix(): void
+    {
+        $this->putSettings([
+            'is_test_mode' => false,
+            'live_site_cd' => 'SMZ9Y8X',
+            'live_enc_key' => 'super-secret-live-key',
+        ])->assertStatus(200);
+
+        $provider = app()->makeWith(
+            \Plugins\Sirsoft\VerificationNhnkcp\Identity\KcpIdentityProvider::class,
+            ['config' => app(PluginSettingsService::class)->get(self::PLUGIN_IDENTIFIER)],
+        );
+
+        $this->assertSame('SMZ9Y8X', $provider->resolveSiteCd());
+    }
+
+    /**
      * core.plugins.update 권한을 가진 관리자 생성.
      */
     private function createAdminUser(): User

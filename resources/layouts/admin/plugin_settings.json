@@ -676,6 +676,11 @@
                                                 },
                                                 "onSuccess": [
                                                     {
+                                                        "comment": "서버가 저장 과정에서 값을 정규화하므로(사이트코드 SM 프리픽스 분리, 암호화 키 마스킹) 응답을 폼에 되돌려 화면과 저장 상태를 일치시킨다. 뒤따르는 refetchDataSource 만으로는 부족하다 — 실측 결과 refetch 는 발생하고 initLocal 도 적용되어 _local.form 은 정규화된 값을 갖지만, 사용자가 직접 입력한 입력칸은 그 값을 다시 받아 쓰지 않아 화면에만 입력값이 남는다. 이 setState 로 폼을 응답으로 명시 재바인딩해야 입력칸이 갱신된다.",
+                                                        "handler": "setState",
+                                                        "params": { "target": "local", "form": "{{response.data}}" }
+                                                    },
+                                                    {
                                                         "handler": "setState",
                                                         "params": { "target": "local", "isSaving": false, "hasChanges": false }
                                                     },

@@ -93,6 +93,73 @@ describe('NHN KCP 환경설정 레이아웃 렌더링', () => {
     });
 
     // @scenario mode=live,live_credentials=complete
+    // @effects sm_prefix_is_added_once
+    it('사이트코드 입력칸은 _local.form 값을 그대로 따라간다', async () => {
+        // 서버는 저장 과정에서 SM 프리픽스를 떼어 보관한다. 화면이 그 결과를 반영하지 못하면
+        // 입력칸 왼쪽 SM 배지와 겹쳐 `SMSMA1B2C` 로 보인다.
+        const { container, utils } = await renderSettings({
+            is_test_mode: false,
+            duplicate_field: 'di',
+            live_site_cd: 'SMA1B2C',
+        });
+
+        const siteCd = container.querySelector('input[name="live_site_cd"]') as HTMLInputElement;
+        expect(siteCd).toBeTruthy();
+        expect(siteCd.value).toBe('SMA1B2C');
+
+        utils.cleanup?.();
+
+        // 저장 응답이 정규화된 값을 되돌린 뒤의 폼 상태 — 같은 입력칸이 그 값을 보여야 한다.
+        const normalized = await renderSettings({
+            is_test_mode: false,
+            duplicate_field: 'di',
+            live_site_cd: 'A1B2C',
+        });
+
+        const after = normalized.container.querySelector('input[name="live_site_cd"]') as HTMLInputElement;
+        expect(after.value).toBe('A1B2C');
+
+        normalized.utils.cleanup?.();
+    });
+
+    // @scenario mode=live,live_credentials=complete
+    // @effects sm_prefix_is_added_once
+    it('저장 성공 시 응답 데이터를 폼에 되돌리는 액션이 있다', async () => {
+        // 앞 테스트가 "폼이 갱신되면 화면도 갱신된다" 를 잠그고, 이 테스트가 "저장 성공이
+        // 실제로 폼을 갱신한다" 를 잠근다. 둘 중 하나만 있으면 회귀를 놓친다.
+        const json = JSON.stringify(settingsLayout);
+        const saveCall = JSON.parse(json);
+
+        const findApiCall = (node: unknown): any => {
+            if (Array.isArray(node)) {
+                for (const child of node) {
+                    const hit = findApiCall(child);
+                    if (hit) return hit;
+                }
+                return null;
+            }
+            if (node && typeof node === 'object') {
+                const obj = node as Record<string, any>;
+                if (obj.handler === 'apiCall' && obj.params?.method === 'PUT') return obj;
+                for (const value of Object.values(obj)) {
+                    const hit = findApiCall(value);
+                    if (hit) return hit;
+                }
+            }
+            return null;
+        };
+
+        const action = findApiCall(saveCall);
+        expect(action).toBeTruthy();
+
+        const rebind = (action.onSuccess ?? []).find(
+            (a: any) => a.handler === 'setState' && a.params?.form === '{{response.data}}',
+        );
+        expect(rebind).toBeTruthy();
+        expect(rebind.params.target).toBe('local');
+    });
+
+    // @scenario mode=live,live_credentials=complete
     // @effects live_mode_warning_shown_in_live_mode
     it('운영 모드로 전환하면 경고 문구가 나타난다', async () => {
         const { container, utils } = await renderSettings({ is_test_mode: false, duplicate_field: 'di' });

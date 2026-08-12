@@ -4,6 +4,12 @@ All notable changes to this plugin will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [1.0.1] - 2026-08-12
+
+### Fixed
+
+- 빌드 산출물이 존재하지 않는 소스맵 파일을 참조해 브라우저 개발자 도구 사용 시 불필요한 404 요청이 발생하던 문제를 수정했습니다.
+
 ## [1.0.0] - 2026-08-10
 
 ### Added

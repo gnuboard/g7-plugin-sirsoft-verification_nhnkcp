@@ -1,5 +1,7 @@
 <?php
 
+// audit:allow api-doc-coverage reason: docblock 서술 정정만 수행 (web GET 브리지의 검증 실패 모드 서술) — 검증 규칙/요청·응답 계약 무변경. 이 브리지는 web 전용 HTML 내비게이션이라 API 문서 대상도 아니다
+
 namespace Plugins\Sirsoft\VerificationNhnkcp\Http\Requests;
 
 use Illuminate\Foundation\Http\FormRequest;
@@ -8,7 +10,9 @@ use Illuminate\Foundation\Http\FormRequest;
  * KCP 인증 결과 브리지 페이지 진입 쿼리를 검증합니다.
  *
  * 콜백 컨트롤러가 302 redirect 로 붙여 보내는 값만 받습니다. 배열 주입
- * (`?verification_token[]=x`)은 string 규칙이 422 로 차단합니다 — 종전에는
+ * (`?verification_token[]=x`)은 string 규칙이 차단합니다 — 이 라우트는 web GET
+ * HTML 내비게이션이라 검증 실패는 422 JSON 이 아니라 redirect-back 으로 끝나며,
+ * 어느 쪽이든 배열이 브리지 payload 에 유입되지 않는 것이 목적입니다. 종전에는
  * `(string)` 캐스팅이 배열을 "Array" 문자열로 바꿔 브리지 payload 에 유입됐습니다.
  * 길이 상한을 두지 않는 이유는 토큰 길이가 코어 발급 정책에 종속되어 있기 때문입니다
  * (kginicis InicisPopupBridgeRequest 선례).

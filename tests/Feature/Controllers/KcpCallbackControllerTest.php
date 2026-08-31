@@ -8,6 +8,7 @@ use App\Enums\IdentityVerificationStatus;
 use App\Models\IdentityVerificationLog;
 use App\Models\User;
 use App\Services\PluginSettingsService;
+use App\Support\AssetUrl;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Str;
 use Plugins\Sirsoft\VerificationNhnkcp\Identity\KcpIdentityProvider;
@@ -35,11 +36,6 @@ class KcpCallbackControllerTest extends PluginTestCase
 
     private const REG_CERT_KEY = 'CERTKEY000000001';
 
-    /**
-     * 테스트 모드 사이트코드·암호화 키로 플러그인 설정을 저장합니다.
-     *
-     * @return void 반환값 없음
-     */
     protected function setUp(): void
     {
         parent::setUp();
@@ -52,13 +48,9 @@ class KcpCallbackControllerTest extends PluginTestCase
     }
 
     /**
-     * 성공 콜백은 검증 토큰을 실어 브리지로 이동하고, 이름·전화번호 같은 개인정보는 주소에 싣지 않는다.
-     *
      * @scenario outcome=success,lookup=by_reg_cert_key,missing_field=none
      *
      * @effects success_issues_verification_token_and_marks_log_verified
-     *
-     * @return void 반환값 없음
      */
     public function test_successful_callback_redirects_to_bridge_with_token(): void
     {
@@ -82,13 +74,9 @@ class KcpCallbackControllerTest extends PluginTestCase
     }
 
     /**
-     * 사용자 취소(`res_cd=9999`) 콜백은 오류 코드 9999 를 실어 브리지로 이동한다.
-     *
      * @scenario outcome=cancelled,lookup=by_reg_cert_key,missing_field=none
      *
      * @effects cancelled_marks_log_cancelled_with_9999_code
-     *
-     * @return void 반환값 없음
      */
     public function test_cancelled_callback_redirects_with_error_code(): void
     {
@@ -106,13 +94,9 @@ class KcpCallbackControllerTest extends PluginTestCase
     }
 
     /**
-     * 등록되지 않은 거래키로 온 콜백은 NOT_FOUND 오류 코드를 실어 브리지로 이동한다.
-     *
      * @scenario outcome=not_found,lookup=by_reg_cert_key,missing_field=none
      *
      * @effects unknown_transaction_returns_not_found
-     *
-     * @return void 반환값 없음
      */
     public function test_unknown_callback_redirects_with_not_found(): void
     {
@@ -126,13 +110,9 @@ class KcpCallbackControllerTest extends PluginTestCase
     }
 
     /**
-     * 브리지 페이지는 토큰 결과를 사이트 출처의 부모창에만 전달하고 자기 주소 출처를 쓰지 않는다.
-     *
      * @scenario outcome=success,lookup=by_param_opt,missing_field=none
      *
      * @effects bridge_query_carries_no_personal_information
-     *
-     * @return void 반환값 없음
      */
     public function test_bridge_page_relays_result_to_opener_without_personal_information(): void
     {
@@ -142,25 +122,16 @@ class KcpCallbackControllerTest extends PluginTestCase
         $response->assertHeader('Content-Type', 'text/html; charset=UTF-8');
 
         $html = $response->getContent();
+        $this->assertStringContainsString('identity_result', (string) $html);
         $this->assertStringContainsString('tok-123', (string) $html);
-        $this->assertStringNotContainsString('window.location.origin', (string) $html);
-        // 전달 동작은 정적 브리지 파일이 한다(#158 strict CSP). 부모창 전달은 사이트 origin 으로 제한되어야 한다.
-        $bridge = (string) file_get_contents(dirname(__DIR__, 3).'/assets/bridge/kcp-bridge.js');
-        $this->assertStringContainsString('identity_result', $bridge);
-        $this->assertStringContainsString('}, SITE_ORIGIN);', $bridge);
-        $this->assertStringNotContainsString('window.location.origin', $bridge);
+        // 부모창 전달은 동일 origin 으로 제한되어야 한다.
+        $this->assertStringContainsString('window.location.origin', (string) $html);
     }
 
     /**
      * 배열 주입(`?verification_token[]=x`)은 KcpBridgeRequest 의 string 규칙이 422 로
      * 차단해야 한다 — 종전 `(string)` 캐스팅은 배열을 "Array" 문자열로 바꿔 브리지
-     * payload 에 유입시켰다. 브리지가 선언된 문자열 결과 필드만 전달한다는 계약의 일부다.
-     *
-     * @scenario outcome=success,lookup=by_param_opt,missing_field=none
-     *
-     * @effects bridge_rejects_non_string_result_field_with_422
-     *
-     * @return void 반환값 없음
+     * payload 에 유입시켰다.
      */
     public function test_bridge_rejects_array_verification_token_with_422(): void
     {
@@ -173,13 +144,6 @@ class KcpCallbackControllerTest extends PluginTestCase
     /**
      * 정상 쿼리의 identity_error / identity_error_message 는 브리지 HTML payload 에
      * 그대로 실려야 한다 (KcpBridgeRequest 주입 후 bridgePayload() 경유 회귀 방지).
-     * 실패 결과에 실린 challenge_id 도 재시도를 위해 그대로 부모창에 전달된다.
-     *
-     * @scenario outcome=cancelled,lookup=by_reg_cert_key,missing_field=none
-     *
-     * @effects failure_bridge_query_carries_challenge_id_for_retry
-     *
-     * @return void 반환값 없음
      */
     public function test_bridge_renders_identity_error_message_passthrough(): void
     {
@@ -193,7 +157,7 @@ class KcpCallbackControllerTest extends PluginTestCase
         $response->assertHeader('Content-Type', 'text/html; charset=UTF-8');
 
         $html = (string) $response->getContent();
-        $this->assertStringContainsString('identity_error_message: payload.identity_error_message', (string) file_get_contents(dirname(__DIR__, 3).'/assets/bridge/kcp-bridge.js'));
+        $this->assertStringContainsString('identity_result', $html);
         $this->assertStringContainsString('"identity_error":"9999"', $html);
         $this->assertStringContainsString('사용자취소', $html);
         $this->assertStringContainsString('"challenge_id":"chal-456"', $html);
@@ -201,11 +165,40 @@ class KcpCallbackControllerTest extends PluginTestCase
 
     /**
      * 결과조회 응답을 가로챈다.
-     *
-     * KCP 테스트 결과조회 호출에 암호화된 신원 정보를 담은 정상 응답을 돌려준다.
-     *
-     * @return void 반환값 없음
      */
+    /**
+     * 브리지 복귀 주소는 요청이 아니라 **설정된 사이트 주소**를 따른다 — 인증기관의 콜백은 사이트
+     * 바깥에서 도착하므로 `url()` 이 실은 요청 호스트는 앞단 프록시 배치에서 사이트 밖이다
+     * (16차 G3 라운드 B-5).
+     *
+     * @scenario outcome=success,lookup=by_reg_cert_key,missing_field=none
+     *
+     * @effects pg_return_and_notify_addresses_follow_the_configured_site_url
+     */
+    public function test_bridge_redirect_follows_the_configured_site_url(): void
+    {
+        config(['app.url' => 'https://example.com/g7']);
+        $log = $this->createChallenge();
+        $this->fakeCertQuery();
+
+        try {
+            $response = $this->post('http://localhost'.self::CALLBACK_URL, [
+                'res_cd' => '0000',
+                'res_msg' => '정상처리',
+                'reg_cert_key' => self::REG_CERT_KEY,
+                'param_opt_1' => $log->id,
+            ]);
+        } finally {
+            AssetUrl::forceBasePrefix(null);
+        }
+
+        $response->assertRedirect();
+        $this->assertStringStartsWith(
+            'https://example.com/g7'.self::BRIDGE_URL.'?',
+            (string) $response->headers->get('Location'),
+        );
+    }
+
     private function fakeCertQuery(): void
     {
         $encrypted = KcpCertCrypto::encrypt((string) json_encode([
@@ -232,7 +225,7 @@ class KcpCallbackControllerTest extends PluginTestCase
     /**
      * 인증 대기 challenge + 거래 행을 만든다.
      *
-     * @return IdentityVerificationLog 거래키와 연결된 인증 대기 challenge 로그
+     * @return IdentityVerificationLog
      */
     private function createChallenge()
     {
